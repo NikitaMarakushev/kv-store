@@ -62,4 +62,14 @@ help:
 	@echo "Available targets:"
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed -e 's/^## //' | column -t -s ':'
 
+## To run the demo
+demo: build
+	@echo "Starting server in background..."
+	@./$(BINARY_SERVER) & echo $$! > server.pid
+	@sleep 2
+	@echo "Running quick load test..."
+	@./$(BINARY_LOADER)
+	@echo "Stopping server..."
+	@kill $$(cat server.pid) && rm server.pid
+
 .DEFAULT_GOAL := help
