@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"hash/fnv"
 	"sync"
 	"time"
@@ -26,9 +27,10 @@ type Shard struct {
 type ShardedStore struct {
 	shards []*Shard
 	mask   uint32
+	wal    *WAL
 }
 
-func NewShardedStore(numShards int) *ShardedStore {
+func NewShardedStore(numShards int, wal *WAL) *ShardedStore {
 	shards := make([]*Shard, numShards)
 	for i := 0; i < numShards; i++ {
 		shards[i] = &Shard{
@@ -39,7 +41,51 @@ func NewShardedStore(numShards int) *ShardedStore {
 	return &ShardedStore{
 		shards: shards,
 		mask:   uint32(numShards - 1),
+		wal:    wal,
 	}
+}
+
+func (s *ShardedStore) setInternal(key, value string, expiresAt time.Time) {
+	shard := s.shards[s.getShardIndex(key)]
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+	shard.items[key] = &Item{Value: value, ExpiresAt: expiresAt}
+}
+
+func (s *ShardedStore) deleteInternal(key string) bool {
+	shard := s.shards[s.getShardIndex(key)]
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	_, exists := shard.items[key]
+	if exists {
+		delete(shard.items, key)
+	}
+	return exists
+}
+
+func (s *ShardedStore) ReplayWAL() error {
+	if s.wal == nil {
+		return nil
+	}
+	return s.wal.Replay(func(entry WALEntry) error {
+		switch entry.Op {
+		case "SET":
+			var expiresAt time.Time
+			if !entry.ExpiresAt.IsZero() {
+				if time.Now().After(entry.ExpiresAt) {
+					return nil
+				}
+				expiresAt = entry.ExpiresAt
+			}
+
+			s.setInternal(entry.Key, entry.Value, expiresAt)
+
+		case "DEL":
+			s.deleteInternal(entry.Key)
+		}
+		return nil
+	})
 }
 
 func (s *ShardedStore) getShardIndex(key string) uint32 {
@@ -49,15 +95,24 @@ func (s *ShardedStore) getShardIndex(key string) uint32 {
 }
 
 func (s *ShardedStore) Set(key, value string, ttlSeconds int) {
-	shard := s.shards[s.getShardIndex(key)]
-	shard.mu.Lock()
-	defer shard.mu.Unlock()
-
-	item := &Item{Value: value}
+	var expiresAt time.Time
 	if ttlSeconds > 0 {
-		item.ExpiresAt = time.Now().Add(time.Duration(ttlSeconds) * time.Second)
+		expiresAt = time.Now().Add(time.Duration(ttlSeconds) * time.Second)
 	}
-	shard.items[key] = item
+
+	if s.wal != nil {
+		err := s.wal.Append(WALEntry{
+			Op:        "SET",
+			Key:       key,
+			Value:     value,
+			ExpiresAt: expiresAt,
+		})
+		if err != nil {
+			panic(fmt.Sprintf("WAL append failed: %v", err))
+		}
+	}
+
+	s.setInternal(key, value, expiresAt)
 }
 
 func (s *ShardedStore) Get(key string) (string, bool) {
@@ -78,13 +133,15 @@ func (s *ShardedStore) Get(key string) (string, bool) {
 }
 
 func (s *ShardedStore) Delete(key string) bool {
-	shard := s.shards[s.getShardIndex(key)]
-	shard.mu.Lock()
-	defer shard.mu.Unlock()
-
-	_, exists := shard.items[key]
-	if exists {
-		delete(shard.items, key)
+	if s.wal != nil {
+		_ = s.wal.Append(WALEntry{Op: "DEL", Key: key})
 	}
-	return exists
+
+	return s.deleteInternal(key)
+}
+
+func (s *ShardedStore) Close() {
+	if s.wal != nil {
+		_ = s.wal.Close()
+	}
 }

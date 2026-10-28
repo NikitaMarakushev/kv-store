@@ -52,9 +52,9 @@ func BenchmarkNaiveStore_Set(b *testing.B) {
 }
 
 func BenchmarkShardedStore_Set_64(b *testing.B) {
-	benchmarkSet(b, NewShardedStore(64), 64)
+	benchmarkSet(b, NewShardedStore(64, nil), 64)
 }
 
 func BenchmarkShardedStore_Set_256(b *testing.B) {
-	benchmarkSet(b, NewShardedStore(256), 256)
+	benchmarkSet(b, NewShardedStore(256, nil), 256)
 }

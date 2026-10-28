@@ -16,13 +16,31 @@ import (
 )
 
 func main() {
-	db := store.NewShardedStore(256)
+	const walPath = "kvstore.wal"
+
+	wal, err := store.NewWAL(walPath)
+	if err != nil {
+		log.Fatalf("Failed to initialize WAL: %v", err)
+	}
+
+	db := store.NewShardedStore(256, wal)
+
+	log.Println("Replaying WAL to restore state...")
+	if err := db.ReplayWAL(); err != nil {
+		log.Fatalf("Failed to replay WAL: %v", err)
+	}
+	log.Println("WAL replay completed.")
 
 	listener, err := net.Listen("tcp", ":6379")
 	if err != nil {
 		log.Fatalf("Failed to start TCP server on 6379: %v", err)
 	}
-	defer listener.Close()
+
+	defer func() {
+		listener.Close()
+		db.Close()
+	}()
+
 	log.Println("KV Store listening on port 6379...")
 
 	go func() {
