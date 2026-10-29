@@ -41,7 +41,7 @@ Since the server uses gRPC, you can interact with it using `grpcurl` (requires [
 ### Delete a value
 `grpcurl -plaintext -d '{"key":"mykey"}' localhost:6379 kv.KV/Delete`
 
-# 📊 Performance & Load Testing
+# Performance & Load Testing
 ### Run the concurrent gRPC load tester (500k requests)
 `make load`
 
