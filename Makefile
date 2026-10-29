@@ -72,4 +72,18 @@ demo: build
 	@echo "Stopping server..."
 	@kill $$(cat server.pid) && rm server.pid
 
+## proto: Generate gRPC code from .proto files
+proto:
+	@echo "Generating gRPC code..."
+	@mkdir -p api
+	protoc --go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		api/kv.proto
+
+## deps: Install required Go dependencies
+deps:
+	go get google.golang.org/grpc
+	go get google.golang.org/protobuf
+	go mod tidy
+
 .DEFAULT_GOAL := help
