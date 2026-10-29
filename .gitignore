@@ -1,44 +1,33 @@
-# Binaries for programs and plugins
+# Binaries
+kv-server
+loader
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-kv-server
-loader
 
-# Test binary, built with `go test -c`
+# Test binary
 *.test
 
 # Output of the go coverage tool
 *.out
 
-# Go workspace file
-go.work
-
-# Dependency directories (if you vendor, though we use go mod)
-vendor/
-
-# Profiling and benchmark artifacts
+# Profiling files
 *.prof
 *.pb.gz
 pprof/
 
-# IDE and Editor files
+# Runtime data (ОБЯЗАТЕЛЬНО)
+kvstore.wal
+*.wal
+
+# IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-*~
 
-# OS generated files
+# OS
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
-
-# Local config (if any)
-.env
