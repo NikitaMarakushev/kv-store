@@ -2,7 +2,8 @@ package store
 
 import (
 	"bufio"
-	"encoding/json"
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"sync"
@@ -10,10 +11,10 @@ import (
 )
 
 type WALEntry struct {
-	Op        string    `json:"op"`
-	Key       string    `json:"key"`
-	Value     string    `json:"value,omitempty"`
-	ExpiresAt time.Time `json:"expires_at,omitempty"`
+	Op        string
+	Key       string
+	Value     string
+	ExpiresAt time.Time
 }
 
 type WAL struct {
@@ -38,18 +39,33 @@ func (w *WAL) Append(entry WALEntry) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return err
-	}
+	var buf bytes.Buffer
 
-	if _, err := w.writer.Write(data); err != nil {
-		return err
+	var op uint8
+	if entry.Op == "SET" {
+		op = 1
+	} else {
+		op = 2
 	}
-	if _, err := w.writer.WriteString("\n"); err != nil {
-		return err
-	}
+	binary.Write(&buf, binary.LittleEndian, op)
 
+	keyBytes := []byte(entry.Key)
+	binary.Write(&buf, binary.LittleEndian, uint16(len(keyBytes)))
+	buf.Write(keyBytes)
+
+	valBytes := []byte(entry.Value)
+	binary.Write(&buf, binary.LittleEndian, uint16(len(valBytes)))
+	buf.Write(valBytes)
+
+	var expiresAt int64
+	if !entry.ExpiresAt.IsZero() {
+		expiresAt = entry.ExpiresAt.Unix()
+	}
+	binary.Write(&buf, binary.LittleEndian, expiresAt)
+
+	if _, err := w.writer.Write(buf.Bytes()); err != nil {
+		return err
+	}
 	if err := w.writer.Flush(); err != nil {
 		return err
 	}
@@ -62,17 +78,61 @@ func (w *WAL) Replay(applyFn func(WALEntry) error) error {
 		return err
 	}
 
-	scanner := bufio.NewScanner(w.file)
-	for scanner.Scan() {
+	reader := bufio.NewReader(w.file)
+
+	for {
 		var entry WALEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			return fmt.Errorf("failed to unmarshal WAL entry: %w", err)
+
+		var op uint8
+		if err := binary.Read(reader, binary.LittleEndian, &op); err != nil {
+			if err.Error() == "EOF" {
+				break
+			}
+			return fmt.Errorf("failed to read op: %w", err)
 		}
+
+		if op == 1 {
+			entry.Op = "SET"
+		} else {
+			entry.Op = "DEL"
+		}
+
+		var keyLen uint16
+		if err := binary.Read(reader, binary.LittleEndian, &keyLen); err != nil {
+			return fmt.Errorf("failed to read key len: %w", err)
+		}
+		keyBytes := make([]byte, keyLen)
+		if _, err := reader.Read(keyBytes); err != nil {
+			return fmt.Errorf("failed to read key: %w", err)
+		}
+		entry.Key = string(keyBytes)
+
+		var valLen uint16
+		if err := binary.Read(reader, binary.LittleEndian, &valLen); err != nil {
+			return fmt.Errorf("failed to read val len: %w", err)
+		}
+		if valLen > 0 {
+			valBytes := make([]byte, valLen)
+			if _, err := reader.Read(valBytes); err != nil {
+				return fmt.Errorf("failed to read value: %w", err)
+			}
+			entry.Value = string(valBytes)
+		}
+
+		var expiresAt int64
+		if err := binary.Read(reader, binary.LittleEndian, &expiresAt); err != nil {
+			return fmt.Errorf("failed to read expiresAt: %w", err)
+		}
+		if expiresAt > 0 {
+			entry.ExpiresAt = time.Unix(expiresAt, 0)
+		}
+
 		if err := applyFn(entry); err != nil {
 			return err
 		}
 	}
-	return scanner.Err()
+
+	return nil
 }
 
 func (w *WAL) Close() error {
