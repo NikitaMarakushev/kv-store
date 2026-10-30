@@ -15,8 +15,8 @@ all: build
 ## build: Compile server and load tester
 build:
 	@echo "Building server and loader..."
-	$(GOBUILD) -o $(BINARY_SERVER) cmd/server/main.go
-	$(GOBUILD) -o $(BINARY_LOADER) cmd/loader/main.go
+	$(GOBUILD) -o $(BINARY_SERVER) ./cmd/server
+	$(GOBUILD) -o $(BINARY_LOADER) ./cmd/loader
 
 ## run: Build and run the KV server
 run: build
